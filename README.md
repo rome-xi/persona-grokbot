@@ -17,7 +17,8 @@
 1. hub 机器上要有 Node.js 22.13+（找不到时设 `PERSONA_NODE=<node 路径>`）。
 2. `personad plugin install dir:<本目录>`，或在 hub 管理界面 › 插件里装。
 3. App › 设置 › 插件 › Grok Bot，填「Grok Bot 登录凭据」（access token）。登录过期时这里会显示「登录过期了」，重新填一次。
-4. 和 Open Lark 里的 Grok Bot 同时开着会在 Agents 页出现两份，关掉其中一个。
+4. hub 机器连不上 `api2.cursor.sh` 时，在插件设置里填「HTTP 代理」（如 `http://127.0.0.1:8080`）。插件拿到的是 hub 给的干净环境，不读 `HTTPS_PROXY`。
+5. 和 Open Lark 里的 Grok Bot 同时开着会在 Agents 页出现两份，关掉其中一个。
 
 ## 风险
 

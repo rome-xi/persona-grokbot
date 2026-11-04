@@ -1,13 +1,13 @@
 {
   "name": "persona-grokbot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Persona plugin: Grok Bot conversations in the Agents tab, live.",
   "type": "module",
   "license": "MIT",
   "engines": {"node": ">=22.13"},
   "scripts": {
-    "test": "node --test test/plugin.test.mjs",
+    "test": "node --test test/plugin.test.mjs test/proxy-fetch.test.mjs",
     "pack": "tar --exclude=.git --exclude=test --exclude='*.tgz' -czf grokbot-$npm_package_version.tgz persona-plugin.json bin src vendor LICENSE README.md"
   }
 }
