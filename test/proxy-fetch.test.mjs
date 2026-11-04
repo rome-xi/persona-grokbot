@@ -71,7 +71,8 @@ test('proxyFetch tunnels through CONNECT and streams the response', async (t) =>
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0' // the self-signed stand-in only
   t.after(() => delete process.env.NODE_TLS_REJECT_UNAUTHORIZED)
   const f = proxyFetch(`http://127.0.0.1:${proxyPort}`)
-  const res = await f(`https://localhost:${upPort}/aiserver.v1.X/Y?a=1`, {
+  // A name that does not resolve: the request can only get there through the tunnel.
+  const res = await f('https://upstream.invalid/aiserver.v1.X/Y?a=1', {
     method: 'POST',
     headers: { authorization: 'Bearer t', 'content-type': 'application/json' },
     body: '{"x":1}',
@@ -90,7 +91,7 @@ test('proxyFetch tunnels through CONNECT and streams the response', async (t) =>
   const [first, second] = chunks.join('').trim().split('\n')
   assert.deepEqual(JSON.parse(first), { method: 'POST', path: '/aiserver.v1.X/Y?a=1', body: '{"x":1}' })
   assert.equal(second, 'second')
-  assert.deepEqual(connects, [`localhost:${upPort}`])
+  assert.deepEqual(connects, ['upstream.invalid:443'])
 })
 
 test('proxyFetch reports a refused CONNECT', async (t) => {

@@ -76,8 +76,9 @@ export function proxyFetch(proxyUrl) {
           method: init.method ?? 'GET',
           path: url.pathname + url.search,
           headers,
+          // No agent: with one (even agent: false, which makes a fresh Agent) Node opens its own direct connection and
+          // ignores createConnection.
           createConnection: () => socket,
-          agent: false,
           signal,
         },
         (res) => {
