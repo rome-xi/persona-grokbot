@@ -137,6 +137,7 @@ test('source: sessions, pages, send, live updates, unread, auth expiry', async (
 
   const { sessions } = await src.sessions()
   assert.deepEqual(sessions.map((s) => s.sessionKey), ['bot1/', 'bot1/side-1234567890', 'bot2/main'])
+  assert.deepEqual(src.known().map((s) => s.sessionKey).sort(), ['bot1/', 'bot1/side-1234567890', 'bot2/main'], 'known: as listed')
   assert.equal(sessions[0].provider, 'grok_bot')
   assert.equal(sessions[1].parentSessionKey, 'bot1/')
   assert.equal(sessions[1].title, 'Writer · side-123')

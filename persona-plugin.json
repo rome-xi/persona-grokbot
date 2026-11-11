@@ -2,30 +2,83 @@
   "manifest_version": 1,
   "id": "grokbot",
   "name": "Grok Bot",
-  "version": "0.1.2",
-  "description": "把 Grok Bot 的对话放进 Agents 页：看对话、发消息，回复实时推到手机，不经 Open Lark 轮询。",
+  "version": "0.2.2",
+  "description": "把 Grok Bot 的对话放进 Agents 页：看对话、发消息，回复实时推到手机，不经 Open Lark 轮询；Persona 助手也能读和回复（发送先在手机上确认）。",
   "publisher": "rome-xi",
   "homepage": "https://github.com/rome-xi/persona-grokbot",
-  "engines": {"plugin_protocol": 1},
+  "engines": {
+    "plugin_protocol": 1
+  },
   "runtime": {
     "command": "bin/grokbot"
   },
-  "activation_events": ["on_startup"],
+  "activation_events": [
+    "on_startup"
+  ],
   "contributes": {
     "agent_sources": [
-      {"id": "grokbot", "name": "Grok Bot", "providers": ["grok_bot"]}
+      {
+        "id": "grokbot",
+        "name": "Grok Bot",
+        "providers": [
+          "grok_bot"
+        ]
+      }
+    ],
+    "assistant": [
+      {
+        "id": "grokbot",
+        "skills": [
+          "skills/grok-bot"
+        ],
+        "instructions": "assistant/notes.md",
+        "gate": "assistant/gate.json"
+      }
     ]
   },
   "configuration": {
     "type": "object",
     "properties": {
-      "watch_sessions": {"type": "integer", "title": "同时实时监听的会话数", "description": "最近活跃的几个会话保持实时连接，其余的按列表刷新", "default": 6, "minimum": 1, "maximum": 20},
-      "include_team_agents": {"type": "boolean", "title": "包括团队里的 Bot", "default": false},
-      "proxy": {"type": "string", "title": "HTTP 代理", "description": "hub 机器连不上 api2.cursor.sh 时填，例如 http://127.0.0.1:8080；留空直连"}
+      "watch_sessions": {
+        "type": "integer",
+        "title": "同时实时监听的会话数",
+        "description": "最近活跃的几个会话保持实时连接，其余的按列表刷新",
+        "default": 6,
+        "minimum": 1,
+        "maximum": 20
+      },
+      "include_team_agents": {
+        "type": "boolean",
+        "title": "包括团队里的 Bot",
+        "default": false
+      },
+      "proxy": {
+        "type": "string",
+        "title": "HTTP 代理",
+        "description": "hub 机器连不上 api2.cursor.sh 时填，例如 http://127.0.0.1:8080；留空直连"
+      },
+      "hub_url": {
+        "type": "string",
+        "title": "hub 在助手那台电脑上的地址",
+        "description": "助手与 hub 必须同机；只接受 127.0.0.1 或 [::1] 的 HTTP(S) 根地址，可修改端口，留空自动选择。"
+      }
     }
   },
   "secrets": [
-    {"name": "access_token", "title": "Grok Bot 登录凭据", "description": "在插件页点「登录 Grok Bot」获取，或填 Grok Bot 桌面客户端的 access token", "required": true}
+    {
+      "name": "access_token",
+      "title": "Grok Bot 登录凭据",
+      "description": "在插件页点「登录 Grok Bot」获取，或填 Grok Bot 桌面客户端的 access token",
+      "required": true
+    }
   ],
-  "permissions": {"network": ["api2.cursor.sh"]}
+  "permissions": {
+    "network": [
+      "api2.cursor.sh"
+    ],
+    "hub": [
+      "agents.read",
+      "agents.control"
+    ]
+  }
 }
