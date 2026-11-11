@@ -1,7 +1,10 @@
 // The Grok Bot agent source: the user's bots and their sessions as Persona personal-agent sessions, kept fresh by
-// watching the busiest few live (WatchGrokBotTranscripts) and re-listing the rest now and then.
+// watching the busiest few live (WatchGrokBotTranscripts) and re-listing the rest now and then. The same unread replies
+// feed the Inbox connector (src/inbox.mjs).
+import { createHash } from 'node:crypto'
 import { RPCError } from './protocol.mjs'
 import { avatarURL } from './avatar.mjs'
+import { createInbox, keyOf } from './inbox.mjs'
 import { collapseNotices, mergeMessages, millis, parseSessionKey, sessionKey, toMessage } from './transcript.mjs'
 
 const PROVIDER = 'grok_bot'
@@ -12,10 +15,26 @@ const PAGE_MAX = 200
 const LIVE_MAX = 200 // newest watched entries kept per session until its page is read
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const EXPIRED = '登录过期了：在插件设置里重新登录 Grok Bot'
+const RELOGIN = 'App › 设置 › 插件 › Grok Bot，重新填「Grok Bot 登录凭据」'
 
 /** An SDKError's HTTP status, when it had one. */
 const httpStatus = (err) => (err && typeof err === 'object' && Number.isInteger(err.httpStatus) ? err.httpStatus : 0)
 const authFailed = (err) => [401, 403].includes(httpStatus(err))
+
+/**
+ * The Grok Bot message id of a reply from the Inbox card: the app's client id when it is one, else one made from what
+ * names the send (its client id, or the item and the text: the hub sends none), so a retry is the same message there
+ * (Grok Bot drops a message id it has seen) and a new reply is a new one.
+ */
+export function replyID({ client_id: clientId, item_id: itemId, thread, text }) {
+  if (typeof clientId === 'string' && UUID.test(clientId)) return clientId.toLowerCase()
+  const name = clientId ? `client\n${clientId}` : `item\n${itemId || thread}\n${text}`
+  const h = createHash('sha1').update(`grokbot-inbox\n${name}`).digest()
+  h[6] = (h[6] & 0x0f) | 0x50 // version 5 (name-based, SHA-1)
+  h[8] = (h[8] & 0x3f) | 0x80
+  const x = h.subarray(0, 16).toString('hex')
+  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20)}`
+}
 
 /**
  * @param {{
@@ -26,6 +45,10 @@ const authFailed = (err) => [401, 403].includes(httpStatus(err))
  *   includeTeamAgents?: boolean,
  *   now?: () => number,
  *   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>,
+ *   triageRules?: string,
+ *   inbox?: boolean,
+ *   later?: (ms: number, fn: () => void) => () => void,
+ *   quietMs?: number,
  * }} opts
  */
 export function createSource(opts) {
@@ -40,10 +63,14 @@ export function createSource(opts) {
         const t = setTimeout(resolve, ms)
         signal?.addEventListener('abort', () => (clearTimeout(t), resolve()), { once: true })
       }))
+  const inbox = createInbox({ notify: opts.notify, now, later: opts.later, rules: opts.triageRules, on: opts.inbox, quietMs: opts.quietMs })
 
   /** @type {Map<string, any>} key → session */
   let sessions = new Map()
+  /** key → the bot's own name (a side session's title has its id after it) */
+  let botNames = new Map()
   let listedAt = 0
+  let lastEventAt = 0
   let listing = null
   /** @type {{status: string, error?: string}} */
   let account = { status: 'active' }
@@ -66,6 +93,7 @@ export function createSource(opts) {
       try {
         const { bots } = await client.listBots({ includeTeamAgents: opts.includeTeamAgents ?? false })
         const next = new Map()
+        const names = new Map()
         for (const bot of bots) {
           if (!bot?.id) continue
           const name = bot.name || bot.title || 'Grok Bot'
@@ -81,6 +109,7 @@ export function createSource(opts) {
             const key = sessionKey(bot.id, sessionId)
             if (next.has(key)) return
             const prev = sessions.get(key)
+            names.set(key, name)
             next.set(key, {
               sessionKey: key,
               accountId: 'grok',
@@ -107,10 +136,13 @@ export function createSource(opts) {
             add(id, millis(s.lastActivityAtMs) || millis(s.updatedAtMs) || millis(s.createdAtMs), `${name} · ${id.slice(0, 8)}`)
           }
         }
+        const gone = [...sessions.keys()].filter((k) => !next.has(k))
         sessions = next
+        botNames = names
         listedAt = now()
         account = { status: 'active' }
         for (const k of [...live.keys()]) if (!next.has(k)) (live.delete(k), counted.delete(k))
+        inbox.gone(gone)
         rewatch()
         return sessions
       } catch (err) {
@@ -158,7 +190,7 @@ export function createSource(opts) {
             for await (const ev of client.watchBot({ botId: ref.botId, sessionId: ref.sessionId, resumeFrom, signal })) {
               if (ev.type === 'resync-required' || (ev.type === 'reset' && !ev.id)) resumeFrom = undefined // start over from the newest
               else if (ev.id) resumeFrom = ev.id
-              if (ev.type !== 'connected' && ev.type !== 'heartbeat') data = true
+              if (ev.type !== 'connected' && ev.type !== 'heartbeat') (data = true), (lastEventAt = now())
               onEvent(key, ev)
             }
             // the server ended it (its lifetime, a resync): go again; one that brought nothing backs off
@@ -201,8 +233,12 @@ export function createSource(opts) {
             if (seen.size > LIVE_MAX) seen.delete(seen.values().next().value)
             counted.set(key, seen)
             s.unreadCount++
+            inbox.replied(key, m, { title: s.title, bot: botNames.get(key) ?? s.title, botId: parseSessionKey(key)?.botId ?? key })
+          } else if (m.role === 'assistant') {
+            inbox.grew(key, m)
           }
         }
+        if (s && m.role === 'user') inbox.userSaid(key, m)
         changed([key])
         return
       }
@@ -237,6 +273,25 @@ export function createSource(opts) {
   async function find(key) {
     if (!sessions.has(key) && now() - listedAt >= RELIST_UNKNOWN_MS) await list(true)
     return session(key)
+  }
+
+  // The client id is Grok Bot's message id: the same one again is a duplicate there, not a second message.
+  async function send({ session_key: key, client_id: clientId, text }) {
+    if (typeof clientId !== 'string' || !UUID.test(clientId)) throw new RPCError('invalid', 'client_id must be a UUID')
+    if (typeof text !== 'string' || !text.trim()) throw new RPCError('invalid', 'text is empty')
+    const s = await find(key)
+    const ref = parseSessionKey(s.sessionKey)
+    try {
+      const sent = await client.sendMessage({ botId: ref.botId, sessionId: ref.sessionId, text, messageId: clientId })
+      s.rankTimeMs = now()
+      if (!watches.has(key)) rewatch()
+      inbox.sent(key) // answered: its Inbox item is over
+      return { delivery: sent.delivery, dispatched: sent.dispatched }
+    } catch (err) {
+      if (authFailed(err)) throw new RPCError('conflict', EXPIRED)
+      if (err?.code === 'MESSAGE_INVALID' || err?.code === 'BOT_ID_REQUIRED') throw new RPCError('invalid', `Grok Bot 不收这条（${err.code}）`)
+      throw new Error(`Grok Bot 没确认收到（${err?.code ?? 'error'}）：可以用同一条重试，它会去重`)
+    }
   }
 
   return {
@@ -306,27 +361,12 @@ export function createSource(opts) {
       return { session: s, messages, hasMore, ...(hasMore ? { nextCursor: String(oldest) } : {}) }
     },
 
-    async send({ session_key: key, client_id: clientId, text }) {
-      // the client id is Grok Bot's message id: the same one again is a duplicate there, not a second message
-      if (typeof clientId !== 'string' || !UUID.test(clientId)) throw new RPCError('invalid', 'client_id must be a UUID')
-      if (typeof text !== 'string' || !text.trim()) throw new RPCError('invalid', 'text is empty')
-      const s = await find(key)
-      const ref = parseSessionKey(s.sessionKey)
-      try {
-        const sent = await client.sendMessage({ botId: ref.botId, sessionId: ref.sessionId, text, messageId: clientId })
-        s.rankTimeMs = now()
-        if (!watches.has(key)) rewatch()
-        return { delivery: sent.delivery, dispatched: sent.dispatched }
-      } catch (err) {
-        if (authFailed(err)) throw new RPCError('conflict', EXPIRED)
-        if (err?.code === 'MESSAGE_INVALID' || err?.code === 'BOT_ID_REQUIRED') throw new RPCError('invalid', `Grok Bot 不收这条（${err.code}）`)
-        throw new Error(`Grok Bot 没确认收到（${err?.code ?? 'error'}）：可以用同一条重试，它会去重`)
-      }
-    },
+    send,
 
     async mark_read({ session_key: key }) {
       const s = session(key)
       s.unreadCount = 0 // what was counted stays counted: a later piece of a read reply is not unread again
+      inbox.read(key)
       return {}
     },
 
@@ -336,6 +376,34 @@ export function createSource(opts) {
 
     async search() {
       throw new RPCError('unsupported', 'Grok Bot 没有搜索')
+    },
+
+    /** connector.status, from memory (the hub asks every 30 seconds and on every tool list). */
+    connectorStatus() {
+      const times = {
+        ...(listedAt ? { last_sync: new Date(listedAt).toISOString() } : {}),
+        ...(lastEventAt ? { last_event: new Date(lastEventAt).toISOString() } : {}),
+      }
+      if (account.status === 'paused') return { state: 'not_signed_in', error: EXPIRED, guide: [RELOGIN], ...times }
+      if (!listedAt && account.error) {
+        // never listed: nothing comes in until it does (a later failure keeps what was listed and the watches)
+        return { state: 'error', error: account.error, guide: ['hub 机器连不上 api2.cursor.sh 时，在插件设置里填「HTTP 代理」'], ...times }
+      }
+      return { state: 'ok', ...times }
+    },
+
+    /** connector.inbox.collect's things, from memory. */
+    inboxThings() {
+      return inbox.things()
+    },
+
+    /** connector.inbox.reply: the user pressed Send on the Inbox card (that is the confirmation); to the session. */
+    async inboxReply(p) {
+      const key = keyOf(p?.thread)
+      if (!key || !parseSessionKey(key)) throw new RPCError('invalid', 'thread is not a Grok Bot session')
+      if (Array.isArray(p.changes) && p.changes.length) throw new RPCError('invalid', 'Grok Bot 的会话没有可改的状态')
+      await send({ session_key: key, client_id: replyID(p), text: p.text })
+      return {}
     },
 
     /** Lists once and starts the watches; keeps listing in the background. */
@@ -366,6 +434,7 @@ export function createSource(opts) {
       stopped.abort()
       for (const w of watches.values()) w.control.abort()
       watches.clear()
+      inbox.stop()
     },
 
     /** for tests */
