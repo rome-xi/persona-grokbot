@@ -1,10 +1,12 @@
 // Grok Bot transcript entries as Persona personal-agent messages (the olk-bridge shapes:
 // {externalId, sessionKey, role, blocks, createTimeMs, position}).
 //
-// The entry kinds are not documented. What is known (grok-bot-sdk docs/guide/notes.md, and Open Lark's adapter
-// that runs against the real service): a `send-message` entry whose message.type is "text" is the bot's reply;
-// an entry whose kind or role says "user" is what the user sent. Everything else is kept as a folded step, so
-// nothing is dropped before the kinds are calibrated.
+// The entry kinds are not documented. What is known (grok-bot-sdk docs/guide/notes.md, Open Lark's adapter that
+// runs against the real service, and real transcripts): a `send-message` entry whose message.type is "text" is the
+// bot's reply, and so is a `message` entry with text (a report the bot posts on its own); an entry whose kind or
+// role says "user" is what the user sent; a `notice` is the service's own line ("A background task was stopped…").
+// `event` and `spend-initiation` entries carry nothing to read and are left out when empty. Anything else is a
+// folded step, so nothing unknown is dropped.
 
 /** @param {unknown} v */
 const text = (v) => (typeof v === 'string' ? v : '')
@@ -31,6 +33,32 @@ export function parseSessionKey(key) {
   return { botId, sessionId }
 }
 
+const clip = (s) => (s.length > 2000 ? s.slice(0, 2000) + '…' : s)
+
+// Bookkeeping kinds with nothing to show when they have no text.
+const QUIET_KINDS = new Set(['event', 'spend-initiation'])
+
+// What a non-text send-message is, for its step's name.
+const MESSAGE_TYPES = { image: '图片', file: '文件', audio: '语音', video: '视频', card: '卡片', link: '链接' }
+
+// The service's notices people see most, in the user's language; others stay as they are.
+const NOTICES = [
+  [/^A background task was stopped after (\d+) minutes? so it would not hang\.?$/i, (m) => `后台任务运行超过 ${m[1]} 分钟，已自动停止，避免卡住。`],
+]
+
+/** @param {string} raw */
+export function noticeText(raw) {
+  const t = raw.trim()
+  for (const [re, say] of NOTICES) {
+    const m = re.exec(t)
+    if (m) return say(m)
+  }
+  return t
+}
+
+// A notice reads as a quiet line under the conversation (a quote in Markdown), not as the bot's words.
+export const NOTICE_MARK = '> ⚙️ '
+
 function bodyText(body) {
   const message = obj(body.message)
   return text(message.content) || text(body.text) || text(body.content) || text(message.text)
@@ -54,7 +82,8 @@ export function toMessage(key, entry) {
     return { ...base, role: 'assistant', blocks: [{ type: 'text', text: e.text }] }
   }
   if (!body || typeof body !== 'object') {
-    return { ...base, role: 'system', blocks: [{ type: 'status', status: 'unavailable', text: kind || 'entry' }] }
+    // a folded step (the apps show unknown block types as raw JSON); status kept for clients that read it
+    return { ...base, role: 'tool', blocks: [{ type: 'tool-call', name: '内容不可用', status: 'unavailable', summary: kind || 'entry' }] }
   }
   const b = obj(body)
   base.createTimeMs = millis(b.sentAtMs) || millis(b.createdAtMs) || millis(b.timestampMs)
@@ -66,9 +95,40 @@ export function toMessage(key, entry) {
   if (kind === 'send-message' && message.type === 'text') {
     return { ...base, role: 'assistant', blocks: [{ type: 'text', text: content }] }
   }
+  if (kind === 'message' && content.trim()) {
+    return { ...base, role: 'assistant', blocks: [{ type: 'text', text: content }] }
+  }
+  if (kind === 'notice' && content.trim()) {
+    return { ...base, role: 'system', blocks: [{ type: 'text', text: NOTICE_MARK + noticeText(content) }] }
+  }
+  if (!content.trim() && QUIET_KINDS.has(kind)) return null
+  if (kind === 'send-message') {
+    const type = text(message.type)
+    const block = { type: 'tool-call', name: `发送了${MESSAGE_TYPES[type] ?? (type ? `${type} 消息` : '非文本消息')}` }
+    if (content) block.summary = clip(content)
+    return { ...base, role: 'tool', blocks: [block] }
+  }
   const block = { type: 'tool-call', name: kind || 'entry' }
-  if (content) block.summary = content.length > 2000 ? content.slice(0, 2000) + '…' : content
+  if (content) block.summary = clip(content)
   return { ...base, role: 'tool', blocks: [block] }
+}
+
+/**
+ * Runs of the same notice one after another (a stuck task stopped every 50 minutes, forty times) as one line: the
+ * latest of the run, with how many times it came.
+ */
+export function collapseNotices(list) {
+  const out = []
+  for (const m of list) {
+    const prev = out.at(-1)
+    const notice = (x) => x?.role === 'system' && x.blocks?.length === 1 && x.blocks[0].type === 'text' && x.blocks[0].text.startsWith(NOTICE_MARK)
+    if (notice(m) && notice(prev?.m) && prev.m.blocks[0].text === m.blocks[0].text) {
+      out[out.length - 1] = { m, n: prev.n + 1 }
+      continue
+    }
+    out.push({ m, n: 1 })
+  }
+  return out.map(({ m, n }) => (n > 1 ? { ...m, blocks: [{ ...m.blocks[0], text: `${m.blocks[0].text}（连续 ${n} 次）` }] } : m))
 }
 
 /** Messages in display order, one per externalId (a later update of the same entry replaces it). */

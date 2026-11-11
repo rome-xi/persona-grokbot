@@ -2,7 +2,7 @@
   "manifest_version": 1,
   "id": "grokbot",
   "name": "Grok Bot",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "把 Grok Bot 的对话放进 Agents 页：看对话、发消息，回复实时推到手机，不经 Open Lark 轮询；Persona 助手也能读和回复（发送先在手机上确认）。",
   "publisher": "rome-xi",
   "homepage": "https://github.com/rome-xi/persona-grokbot",

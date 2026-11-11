@@ -1,7 +1,8 @@
 // The Grok Bot agent source: the user's bots and their sessions as Persona personal-agent sessions, kept fresh by
 // watching the busiest few live (WatchGrokBotTranscripts) and re-listing the rest now and then.
 import { RPCError } from './protocol.mjs'
-import { mergeMessages, millis, parseSessionKey, sessionKey, toMessage } from './transcript.mjs'
+import { avatarURL } from './avatar.mjs'
+import { collapseNotices, mergeMessages, millis, parseSessionKey, sessionKey, toMessage } from './transcript.mjs'
 
 const PROVIDER = 'grok_bot'
 const ROOM_KINDS = new Set(['2', 'ROOM', 'GROK_BOT_AGENT_KIND_ROOM'])
@@ -70,6 +71,12 @@ export function createSource(opts) {
           const name = bot.name || bot.title || 'Grok Bot'
           const room = ROOM_KINDS.has(String(bot.kind ?? ''))
           const main = bot.sessionId ?? ''
+          let avatarUrl = ''
+          try {
+            avatarUrl = avatarURL(bot)
+          } catch {
+            // no avatar is fine
+          }
           const add = (sessionId, activity, title) => {
             const key = sessionKey(bot.id, sessionId)
             if (next.has(key)) return
@@ -84,6 +91,7 @@ export function createSource(opts) {
               canSend: true,
               unreadCount: prev?.unreadCount ?? 0,
               rankTimeMs: Math.max(activity, prev?.rankTimeMs ?? 0),
+              ...(avatarUrl ? { avatarUrl } : {}),
             })
           }
           add(main, millis(bot.updatedAtMs) || millis(bot.createdAtMs), name)
@@ -279,6 +287,11 @@ export function createSource(opts) {
         limit: n,
         ...(cursor ? { beforeSeq: String(cursor) } : {}),
       })
+      // the next page starts below this one's oldest entry, shown or not (left out, or folded into a run of notices)
+      const oldest = page.entries.reduce((low, e) => {
+        const seq = millis(e?.seq)
+        return seq && (!low || seq < low) ? seq : low
+      }, 0)
       let messages = page.entries.map((e) => toMessage(key, e)).filter(Boolean)
       messages.sort((a, b) => a.position - b.position)
       if (!cursor) {
@@ -288,7 +301,7 @@ export function createSource(opts) {
         messages = mergeMessages(messages, newer)
         live.set(key, newer)
       }
-      const oldest = messages[0]?.position
+      messages = collapseNotices(messages)
       const hasMore = page.entries.length >= n && Boolean(oldest)
       return { session: s, messages, hasMore, ...(hasMore ? { nextCursor: String(oldest) } : {}) }
     },

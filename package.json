@@ -1,6 +1,6 @@
 {
   "name": "persona-grokbot",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Persona plugin: Grok Bot conversations in the Agents tab, live; the assistant reads and answers them.",
   "type": "module",

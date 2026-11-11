@@ -9,7 +9,7 @@ import { createSource } from './source.mjs'
 import { proxyFetch } from './proxy-fetch.mjs'
 
 const log = (msg) => process.stderr.write(`grokbot: ${msg}\n`)
-const VERSION = '0.2.2'
+const VERSION = '0.2.3'
 
 // For end-to-end tests only: a GROKBOT_TEST_ORIGIN file in the plugin's data directory holding
 // http://127.0.0.1:<port> sends every Grok Bot request to a local fake instead (the hub gives an installed plugin a
