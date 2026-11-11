@@ -1,13 +1,15 @@
 {
   "name": "persona-grokbot",
-  "version": "0.1.2",
+  "version": "0.2.2",
   "private": true,
-  "description": "Persona plugin: Grok Bot conversations in the Agents tab, live.",
+  "description": "Persona plugin: Grok Bot conversations in the Agents tab, live; the assistant reads and answers them.",
   "type": "module",
   "license": "MIT",
-  "engines": {"node": ">=22.13"},
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
-    "test": "node --test test/plugin.test.mjs test/proxy-fetch.test.mjs",
-    "pack": "tar --exclude=.git --exclude=test --exclude='*.tgz' -czf grokbot-$npm_package_version.tgz persona-plugin.json bin src vendor LICENSE README.md"
+    "test": "node --test test/plugin.test.mjs test/proxy-fetch.test.mjs test/assistant.test.mjs",
+    "pack": "tar --exclude=.git --exclude=test --exclude='*.tgz' -czf grokbot-$npm_package_version.tgz persona-plugin.json bin src vendor skills assistant LICENSE README.md"
   }
 }

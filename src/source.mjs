@@ -261,6 +261,11 @@ export function createSource(opts) {
       return { sessions: [...sessions.values()].sort((a, b) => b.rankTimeMs - a.rankTimeMs) }
     },
 
+    // The sessions as last listed, without listing: for the phone card's names, which the hub waits on only briefly.
+    known() {
+      return [...sessions.values()]
+    },
+
     async messages({ session_key: key, cursor: rawCursor, limit }) {
       // the hub passes "" for the newest page; an older page's cursor is the oldest seq we gave out
       const cursor = typeof rawCursor === 'string' && /^\d{1,20}$/.test(rawCursor) ? rawCursor : ''

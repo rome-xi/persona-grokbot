@@ -1,0 +1,67 @@
+{
+  "command": "grok",
+  "script": "grok-bot/scripts/grok.sh",
+  "title": "Grok Bot",
+  "env": [
+    "GROKBOT_API",
+    "GROKBOT_TOKEN"
+  ],
+  "base_env": "GROKBOT_API",
+  "secret": [
+    "GROKBOT_TOKEN"
+  ],
+  "headers": [
+    "content-type",
+    "accept"
+  ],
+  "auth": {
+    "header": "Authorization",
+    "value": "Bearer ${GROKBOT_TOKEN}"
+  },
+  "rules": [
+    {
+      "method": "GET",
+      "path": "/sessions/**",
+      "action": "allow"
+    },
+    {
+      "method": "POST",
+      "path": "/sessions/*/read",
+      "action": "allow"
+    },
+    {
+      "method": "POST",
+      "path": "/sessions/*/*/read",
+      "action": "allow"
+    },
+    {
+      "method": "POST",
+      "path": "/sessions/*/messages",
+      "action": "confirm"
+    },
+    {
+      "method": "POST",
+      "path": "/sessions/*/*/messages",
+      "action": "confirm"
+    },
+    {
+      "method": "*",
+      "path": "**",
+      "action": "deny"
+    }
+  ],
+  "actions": [
+    {
+      "pattern": "^POST /sessions/.+/messages$",
+      "what": "发消息"
+    },
+    {
+      "pattern": "^POST /sessions/.+/read$",
+      "what": "标为已读"
+    }
+  ],
+  "tool": {
+    "name": "grok_bot",
+    "description": "Run grok-bot skill: args [\"GET\",\"/sessions\"] or [\"GET\",\"/sessions/grokbot:BOT/SESSION/messages?limit=20\"], or [\"POST\",\"/sessions/grokbot:BOT/SESSION/messages\",\"{\\\"clientId\\\":\\\"UUID\\\",\\\"text\\\":\\\"hello\\\"}\"]. Only Grok Bot IDs; inline JSON <=1800 bytes, no dollar signs or files. Generate a UUID once and reuse unchanged on retry. Reads run directly; sends require phone confirmation."
+  }
+}
