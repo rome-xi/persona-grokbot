@@ -16,8 +16,10 @@ export const PROTOCOL = 1
 /**
  * @param {{
  *   id: string, version: string,
+ *   contributes?: Record<string, unknown[]>,
  *   initialize: (params: any, hub: {notify: (event: string, params: any) => void}) => Promise<void> | void,
  *   handlers: Record<string, (params: any) => Promise<any>>,
+ *   missing?: (method: string) => RPCError | undefined,
  *   onClose?: () => void,
  *   input?: NodeJS.ReadableStream, output?: NodeJS.WritableStream,
  * }} prog
@@ -39,13 +41,13 @@ export function serve(prog) {
           await prog.initialize(params, hub)
           initialized = true
         }
-        return write({ id, result: { protocol: PROTOCOL, id: prog.id, version: prog.version } })
+        return write({ id, result: { protocol: PROTOCOL, id: prog.id, version: prog.version, ...(prog.contributes ? { contributes: prog.contributes } : {}) } })
       }
       if (method === 'manifest') throw new RPCError('unknown_method', 'no manifest here: it is in the package')
       if (!initialized) throw new RPCError('not_initialized', 'not initialized')
       if (method === 'ping') return write({ id, result: {} })
       const h = prog.handlers[method]
-      if (!h) throw new RPCError('unknown_method', `unknown method ${method}`)
+      if (!h) throw prog.missing?.(method) ?? new RPCError('unknown_method', `unknown method ${method}`)
       write({ id, result: (await h(params)) ?? {} })
     } catch (err) {
       const code = err instanceof RPCError ? err.code : undefined

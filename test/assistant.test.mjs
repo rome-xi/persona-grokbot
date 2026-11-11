@@ -136,7 +136,7 @@ test('plugin: assistant.credentials and assistant.summary over the protocol', as
   try {
     // no Grok Bot login yet: the assistant's gate still gets its credentials
     const init = await call('initialize', { protocol: 1, config: {}, hub: { url: 'http://127.0.0.1:18660', token: 'pext_t' } })
-    assert.equal(init.result.version, '0.2.3')
+    assert.equal(init.result.version, '0.3.0')
     const cred = await call('assistant.credentials', { contribution: 'grokbot' })
     assert.deepEqual(cred.result, { env: { GROKBOT_API: 'http://127.0.0.1:18660/api/v1/agents', GROKBOT_TOKEN: 'pext_t' } })
     const sum = await call('assistant.summary', { contribution: 'grokbot', summary: 'POST /sessions/grokbot:b//messages' })
@@ -163,7 +163,7 @@ test('plugin: a non-loopback hub_url starts the plugin but refuses the assistant
     })
   try {
     const init = await call('initialize', { protocol: 1, config: { hub_url: 'https://example.com' }, hub: { url: 'http://127.0.0.1:18660', token: 'pext_t' } })
-    assert.equal(init.result.version, '0.2.3', 'initialize still succeeds')
+    assert.equal(init.result.version, '0.3.0', 'initialize still succeeds')
     const st = await call('agentsrc.status', { contribution: 'grokbot' })
     assert.equal(st.result.enabled, true, 'the Agents source keeps working')
     const cred = await call('assistant.credentials', { contribution: 'grokbot' })

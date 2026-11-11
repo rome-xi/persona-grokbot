@@ -1,8 +1,8 @@
 {
   "name": "persona-grokbot",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "private": true,
-  "description": "Persona plugin: Grok Bot conversations in the Agents tab, live; the assistant reads and answers them.",
+  "description": "Persona plugin: Grok Bot conversations in the Agents tab, live; unread bot replies in the Inbox; the assistant reads and answers them.",
   "type": "module",
   "license": "MIT",
   "engines": {
