@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { PassThrough } from 'node:stream'
-import { mergeMessages, parseSessionKey, toMessage } from '../src/transcript.mjs'
+import { collapseNotices, mergeMessages, NOTICE_MARK, parseSessionKey, toMessage } from '../src/transcript.mjs'
+import { avatarURL, characterSVG } from '../src/avatar.mjs'
 import { serve, RPCError } from '../src/protocol.mjs'
 import { createSource } from '../src/source.mjs'
 
@@ -13,7 +14,9 @@ test('entries become messages: reply, user, folded step, unavailable', () => {
   const step = toMessage(k, { seq: 6, entryId: 'e6', entryKind: 'tool-run', body: { kind: 'tool-run', content: 'ls' } })
   assert.equal(step.role, 'tool')
   assert.deepEqual(step.blocks, [{ type: 'tool-call', name: 'tool-run', summary: 'ls' }])
-  assert.equal(toMessage(k, { seq: 7, entryId: 'e7', entryKind: 'blob', body: null }).blocks[0].status, 'unavailable')
+  const gone = toMessage(k, { seq: 7, entryId: 'e7', entryKind: 'blob', body: null })
+  assert.equal(gone.blocks[0].type, 'tool-call', 'not a block type the apps show as raw JSON')
+  assert.equal(gone.blocks[0].status, 'unavailable')
   assert.equal(toMessage(k, { seq: 0 }), null, 'no id, no message')
   // the watch stream's message event: the whole current text
   assert.equal(toMessage(k, { seq: '9', entryId: 'e9', text: 'partial' }).blocks[0].text, 'partial')
@@ -241,4 +244,68 @@ test('watch: reconnect, resync, backoff, auth stop and restart, live bound', asy
   assert.ok(listed._state().live.get('bot1/').length <= 200, 'live entries are bounded')
   listed.stop()
   src.stop()
+})
+
+test('real entry kinds: bot reports, notices, quiet bookkeeping, non-text sends', () => {
+  const k = 'bot1/'
+  const report = toMessage(k, { seq: 10, entryId: 'm10', entryKind: 'message', body: { kind: 'message', content: 'PR 已合入' } })
+  assert.deepEqual([report.role, report.blocks], ['assistant', [{ type: 'text', text: 'PR 已合入' }]])
+  const notice = toMessage(k, { seq: 11, entryId: 'n11', entryKind: 'notice', body: { kind: 'notice', content: 'A background task was stopped after 50 minutes so it would not hang.' } })
+  assert.equal(notice.role, 'system')
+  assert.equal(notice.blocks[0].text, NOTICE_MARK + '后台任务运行超过 50 分钟，已自动停止，避免卡住。')
+  assert.equal(toMessage(k, { seq: 12, entryId: 'n12', entryKind: 'notice', body: { content: 'Something new' } }).blocks[0].text, NOTICE_MARK + 'Something new')
+  assert.equal(toMessage(k, { seq: 13, entryId: 'e13', entryKind: 'event', body: { kind: 'event' } }), null, 'empty bookkeeping is left out')
+  assert.equal(toMessage(k, { seq: 14, entryId: 'e14', entryKind: 'spend-initiation', body: {} }), null)
+  assert.equal(toMessage(k, { seq: 15, entryId: 'e15', entryKind: 'event', body: { content: 'x' } }).role, 'tool', 'an event with text stays a step')
+  assert.equal(toMessage(k, { seq: 16, entryId: 'e16', entryKind: 'send-message', body: { message: { type: 'image' } } }).blocks[0].name, '发送了图片')
+  assert.equal(toMessage(k, { seq: 17, entryId: 'e17', entryKind: 'send-message', body: { message: {} } }).blocks[0].name, '发送了非文本消息')
+})
+
+test('a run of the same notice is one line with its count; other messages break the run', () => {
+  const n = (id, t) => ({ externalId: id, role: 'system', position: 0, blocks: [{ type: 'text', text: NOTICE_MARK + t }] })
+  const a = { externalId: 'a', role: 'assistant', position: 0, blocks: [{ type: 'text', text: NOTICE_MARK + 'same' }] }
+  const out = collapseNotices([n('1', 'same'), n('2', 'same'), n('3', 'same'), a, n('4', 'same'), n('5', 'other')])
+  assert.deepEqual(out.map((m) => m.externalId), ['3', 'a', '4', '5'], 'the latest of a run stays')
+  assert.equal(out[0].blocks[0].text, NOTICE_MARK + 'same（连续 3 次）')
+  assert.equal(out[2].blocks[0].text, NOTICE_MARK + 'same', 'a single notice keeps its text')
+})
+
+test('pages: the cursor goes below hidden and folded entries, so nothing comes back on the next page', async () => {
+  const entries = [
+    { seq: '1', entryId: 'n1', entryKind: 'notice', body: { content: 'A background task was stopped after 50 minutes so it would not hang.' } },
+    { seq: '2', entryId: 'n2', entryKind: 'notice', body: { content: 'A background task was stopped after 50 minutes so it would not hang.' } },
+    { seq: '3', entryId: 'e3', entryKind: 'event', body: {} },
+    { seq: '4', entryId: 'm4', entryKind: 'send-message', body: { kind: 'send-message', message: { type: 'text', content: 'hi' } } },
+  ]
+  const client = {
+    async listBots() {
+      return { bots: [{ id: 'bot1', name: 'Writer', sessionId: '', kind: 'GROK_BOT_AGENT_KIND_AGENT', updatedAtMs: '1' }] }
+    },
+    async listSessions() {
+      return { sessions: [] }
+    },
+    async listTranscript({ limit }) {
+      return { entries: entries.slice(-limit) }
+    },
+    watchBot: () => (async function* () {})(),
+  }
+  const src = createSource({ client, notify: () => {}, watchSessions: 1, now: () => 1_000_000, sleep: () => new Promise(() => {}) })
+  await src.start()
+  const page = await src.messages({ session_key: 'bot1/', cursor: '', limit: 4 })
+  src.stop()
+  assert.deepEqual(page.messages.map((m) => m.externalId), ['n2', 'm4'])
+  assert.equal(page.nextCursor, '1', 'below the oldest entry of the page, which is folded into the run')
+})
+
+test('avatars: the bot\'s picture, else its character as an SVG the hub can draw', () => {
+  assert.equal(avatarURL({ avatar: { picture: { url: 'https://example.com/a.png' }, character: { baseHex: '#1084FE' } } }), 'https://example.com/a.png')
+  const url = avatarURL({ avatar: { picture: null, character: { shape: 'hex', color: 'blue', baseHex: '#1084FE' } } })
+  assert.match(url, /^data:image\/svg\+xml;base64,/)
+  const svg = Buffer.from(url.split(',')[1], 'base64').toString()
+  assert.match(svg, /fill="#1084FE"/)
+  assert.match(svg, /<polygon/)
+  assert.ok(!/<text/.test(svg), 'no text: the hub draws paths only')
+  assert.match(characterSVG('unknown-shape', 'not-a-colour'), /fill="#777777"/)
+  assert.equal(avatarURL({}), '')
+  assert.equal(avatarURL({ avatar: { picture: { url: 'http://insecure.example/a.png' } } }), '', 'only https or data pictures')
 })
